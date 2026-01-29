@@ -110,6 +110,28 @@ def get_initial_guesses(x, y):
     
     return guesses
 
+def calculate_projection(model_name, model_params, years_array):
+    """Calculate projection for a given model"""
+    if model_name == "Linear":
+        return np.polyval(model_params, years_array)
+    elif model_name == "Polynomial (degree 2)":
+        return np.polyval(model_params, years_array)
+    elif model_name == "Logarithmic":
+        return np.polyval(model_params, np.log(years_array + 1))
+    elif model_name == "Exponential Saturation":
+        return exp_saturation(years_array, *model_params)
+    elif model_name == "Exponential Decay":
+        return exp_decay(years_array, *model_params)
+    elif model_name == "Asymptotic":
+        return asymptotic(years_array, *model_params)
+    elif model_name == "Logistic":
+        return logistic(years_array, *model_params)
+    elif model_name == "Gompertz":
+        return gompertz(years_array, *model_params)
+    elif model_name == "Power Law":
+        return power_law(years_array, *model_params)
+    return None
+
 # =========================
 # Main logic
 # =========================
@@ -245,116 +267,45 @@ if run:
                 })
 
             r2_df = pd.DataFrame(r2_rows).sort_values("R²", ascending=False).reset_index(drop=True)
-
             best_model = r2_df.iloc[0]["Model"]
-            best_fit_obs = models[best_model]
-            best_eq = equations[best_model]
-            best_r2 = r2_df.iloc[0]["R²"]
-            best_params = params[best_model]
 
             # =========================
-            # Projection (25y) - OPTIMIZED
+            # Calculate projections for graphs (sampled)
             # =========================
-            status_text.text("Generating 25-year projection...")
+            status_text.text("Generating projections...")
             
-            # Calculate projection with smart sampling to avoid memory issues
-            total_hours = 25 * 365.25 * 24
-            
-            # For output: sample every dt_hours
+            # For graphs: use sampled data
             if dt_hours <= 24:
-                # For hourly/sub-daily data, sample daily for projection output
                 sample_hours = 24
             else:
                 sample_hours = dt_hours
             
-            total_steps = int(total_hours / sample_hours)
-            total_years = np.arange(total_steps) * sample_hours / (24 * 365.25)
-
-            # Define projection functions
-            if best_model == "Linear":
-                proj = np.polyval(best_params, total_years)
-            elif best_model == "Polynomial (degree 2)":
-                proj = np.polyval(best_params, total_years)
-            elif best_model == "Logarithmic":
-                proj = np.polyval(best_params, np.log(total_years + 1))
-            elif best_model == "Exponential Saturation":
-                proj = exp_saturation(total_years, *best_params)
-            elif best_model == "Exponential Decay":
-                proj = exp_decay(total_years, *best_params)
-            elif best_model == "Asymptotic":
-                proj = asymptotic(total_years, *best_params)
-            elif best_model == "Logistic":
-                proj = logistic(total_years, *best_params)
-            elif best_model == "Gompertz":
-                proj = gompertz(total_years, *best_params)
-            elif best_model == "Power Law":
-                proj = power_law(total_years, *best_params)
-
-            # Generate time array for full 25-year period
-            # Use original dt_hours interval for the entire projection
-            total_steps_original = int(25 * 365.25 * 24 / dt_hours)
-            time_full = [(t0 + timedelta(hours=float(i * dt_hours))).strftime("%m/%d/%Y %H:%M")
-                         for i in range(total_steps_original)]
+            total_steps_sampled = int(25 * 365.25 * 24 / sample_hours)
+            sample_years = np.arange(total_steps_sampled) * sample_hours / (24 * 365.25)
             
-            # Calculate full projection at original resolution
-            total_years_original = np.arange(total_steps_original) * dt_hours / (24 * 365.25)
-            
-            if best_model == "Linear":
-                proj_full = np.polyval(best_params, total_years_original)
-            elif best_model == "Polynomial (degree 2)":
-                proj_full = np.polyval(best_params, total_years_original)
-            elif best_model == "Logarithmic":
-                proj_full = np.polyval(best_params, np.log(total_years_original + 1))
-            elif best_model == "Exponential Saturation":
-                proj_full = exp_saturation(total_years_original, *best_params)
-            elif best_model == "Exponential Decay":
-                proj_full = exp_decay(total_years_original, *best_params)
-            elif best_model == "Asymptotic":
-                proj_full = asymptotic(total_years_original, *best_params)
-            elif best_model == "Logistic":
-                proj_full = logistic(total_years_original, *best_params)
-            elif best_model == "Gompertz":
-                proj_full = gompertz(total_years_original, *best_params)
-            elif best_model == "Power Law":
-                proj_full = power_law(total_years_original, *best_params)
-            
-            # Create data_model column: observed data for first n rows, NaN for the rest
-            data_model = np.full(total_steps_original, np.nan)
-            data_model[:n] = data
-            
-            result_df = pd.DataFrame({
-                "time": time_full,
-                "data model": data_model,
-                "best fit": proj_full
-            })
-            
-            # Warn if CSV will be very large
-            if total_steps_original > 100000:
-                st.session_state.large_csv_warning = f"⚠️ Note: CSV will contain {total_steps_original:,} rows (~{total_steps_original*50//1024//1024}MB). This may take time to download."
-            else:
-                st.session_state.large_csv_warning = None
+            # Calculate all projections (sampled for graphs)
+            all_projections_sampled = {}
+            for model_name in params.keys():
+                all_projections_sampled[model_name] = calculate_projection(model_name, params[model_name], sample_years)
 
             progress_bar.progress(100)
             status_text.text("Done!")
             
-            # For graphs, use sampled data for better performance
-            sample_years = total_years  # Already calculated earlier with sampling
-            sample_proj = proj  # Already calculated earlier with sampling
-            
+            # Store in session state
             st.session_state.r2_df = r2_df
-            st.session_state.result_df = result_df
+            st.session_state.all_models = models
+            st.session_state.all_equations = equations
+            st.session_state.all_params = params
             st.session_state.best_model = best_model
-            st.session_state.best_r2 = best_r2
-            st.session_state.best_eq = best_eq
             st.session_state.years_obs = years
             st.session_state.data_obs = data
-            st.session_state.best_fit_obs = best_fit_obs
-            st.session_state.years_full = sample_years  # Use sampled for graphs
-            st.session_state.proj = sample_proj  # Use sampled for graphs
             st.session_state.n_models_fitted = len(models)
-            st.session_state.csv_rows = len(result_df)
-            st.session_state.sample_info = f"CSV contains all {len(result_df):,} rows at {dt_hours}-hour intervals. Graphs use optimized sampling for display."
-
+            st.session_state.t0 = t0
+            st.session_state.dt_hours = dt_hours
+            st.session_state.sample_years = sample_years
+            st.session_state.all_projections_sampled = all_projections_sampled
+            st.session_state.n = n
+            
             # Clear progress indicators
             progress_bar.empty()
             status_text.empty()
@@ -362,74 +313,137 @@ if run:
             st.success(f"✅ Successfully fitted {len(models)} models to your data!")
 
         except Exception as e:
-            progress_bar.empty()
-            status_text.empty()
+            if 'progress_bar' in locals():
+                progress_bar.empty()
+            if 'status_text' in locals():
+                status_text.empty()
             st.error(f"❌ Error: {str(e)}")
             st.info("💡 Tips: Check that your data is properly formatted (one number per line) and contains at least 6 data points.")
 
 # =========================
 # Output
 # =========================
-if "result_df" in st.session_state:
+if "r2_df" in st.session_state:
 
     st.subheader("📊 R² Comparison (All Models)")
     st.write(f"*{st.session_state.n_models_fitted} models successfully fitted*")
     st.dataframe(st.session_state.r2_df, hide_index=True)
 
-    st.subheader("📐 Best Fitted Model")
+    # =========================
+    # MODEL SELECTOR
+    # =========================
+    st.subheader("🎯 Select Model for Display")
+    
+    # Create list of models with best model first
+    model_list = list(st.session_state.all_params.keys())
+    best_idx = model_list.index(st.session_state.best_model)
+    model_list.insert(0, model_list.pop(best_idx))
+    
+    # Format options to show best model
+    model_options = [f"{'⭐ ' if m == st.session_state.best_model else ''}{m}" for m in model_list]
+    
+    selected_display = st.selectbox(
+        "Choose which model to display in graphs and export to CSV:",
+        model_options,
+        index=0,
+        help="The model marked with ⭐ has the highest R² score"
+    )
+    
+    # Extract actual model name (remove star if present)
+    selected_model = selected_display.replace("⭐ ", "")
+    
+    # Get selected model info
+    selected_r2 = st.session_state.r2_df[st.session_state.r2_df["Model"] == selected_model]["R²"].values[0]
+    selected_eq = st.session_state.all_equations[selected_model]
+    selected_fit_obs = st.session_state.all_models[selected_model]
+    selected_params = st.session_state.all_params[selected_model]
+    selected_proj_sampled = st.session_state.all_projections_sampled[selected_model]
+    
+    # =========================
+    # Display Selected Model Info
+    # =========================
+    st.subheader("📐 Selected Model Details")
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Model", st.session_state.best_model)
+        st.metric("Model", selected_model)
     with col2:
-        st.metric("R² Score", f"{st.session_state.best_r2:.4f}")
+        st.metric("R² Score", f"{selected_r2:.4f}")
     with col3:
         st.write("**Equation:**")
-        st.code(st.session_state.best_eq)
+        st.code(selected_eq)
 
+    # =========================
     # Plot 1: Observed vs Fit
-    st.subheader("📈 Observed Data vs Best Fit")
+    # =========================
+    st.subheader("📈 Observed Data vs Selected Model Fit")
     fig1, ax1 = plt.subplots(figsize=(10, 6))
     ax1.plot(st.session_state.years_obs, st.session_state.data_obs, 'o-', 
              label="Observed", linewidth=2, markersize=6, color='#1f77b4')
-    ax1.plot(st.session_state.years_obs, st.session_state.best_fit_obs, '--', 
-             label="Best Fit", linewidth=2, color='#ff7f0e')
+    ax1.plot(st.session_state.years_obs, selected_fit_obs, '--', 
+             label=f"{selected_model} Fit", linewidth=2, color='#ff7f0e')
     ax1.set_xlabel("Time (years)", fontsize=12)
     ax1.set_ylabel("Bed Elevation", fontsize=12)
-    ax1.set_title("Observed Data vs Best Fit Model", fontsize=14, fontweight='bold')
+    ax1.set_title(f"Observed Data vs {selected_model} Model", fontsize=14, fontweight='bold')
     ax1.legend(fontsize=10)
     ax1.grid(True, alpha=0.3)
     st.pyplot(fig1)
 
+    # =========================
     # Plot 2: 25-year projection
+    # =========================
     st.subheader("🔮 25-Year Projection")
-    st.info(st.session_state.sample_info)
     fig2, ax2 = plt.subplots(figsize=(10, 6))
-    ax2.plot(st.session_state.years_full, st.session_state.proj, 
-             label="Projection", linewidth=2, color='#2ca02c')
+    ax2.plot(st.session_state.sample_years, selected_proj_sampled, 
+             label=f"{selected_model} Projection", linewidth=2, color='#2ca02c')
     ax2.axvline(st.session_state.years_obs[-1], linestyle="--", 
                 color="red", linewidth=2, label="End of Observation", alpha=0.7)
     ax2.set_xlabel("Time (years)", fontsize=12)
     ax2.set_ylabel("Bed Elevation", fontsize=12)
-    ax2.set_title(f"25-Year Projection using {st.session_state.best_model} Model", 
+    ax2.set_title(f"25-Year Projection using {selected_model} Model", 
                   fontsize=14, fontweight='bold')
     ax2.legend(fontsize=10)
     ax2.grid(True, alpha=0.3)
     st.pyplot(fig2)
 
-    # Download button
+    # =========================
+    # Generate CSV for selected model
+    # =========================
     st.subheader("💾 Download Results")
     
-    if st.session_state.get('large_csv_warning'):
-        st.warning(st.session_state.large_csv_warning)
+    with st.spinner("Generating CSV..."):
+        # Calculate full resolution projection for CSV
+        total_steps_original = int(25 * 365.25 * 24 / st.session_state.dt_hours)
+        total_years_original = np.arange(total_steps_original) * st.session_state.dt_hours / (24 * 365.25)
+        
+        # Generate full projection
+        proj_full = calculate_projection(selected_model, selected_params, total_years_original)
+        
+        # Generate time array
+        time_full = [(st.session_state.t0 + timedelta(hours=float(i * st.session_state.dt_hours))).strftime("%m/%d/%Y %H:%M")
+                     for i in range(total_steps_original)]
+        
+        # Create data_model column
+        data_model = np.full(total_steps_original, np.nan)
+        data_model[:st.session_state.n] = st.session_state.data_obs
+        
+        result_df = pd.DataFrame({
+            "time": time_full,
+            "data model": data_model,
+            "best fit": proj_full
+        })
     
-    csv_data = st.session_state.result_df.to_csv(index=False)
+    # Warn if CSV will be very large
+    if total_steps_original > 100000:
+        st.warning(f"⚠️ Note: CSV will contain {total_steps_original:,} rows (~{total_steps_original*50//1024//1024}MB). This may take time to download.")
+    
+    csv_data = result_df.to_csv(index=False)
     st.download_button(
-        label="⬇️ Download CSV",
+        label=f"⬇️ Download CSV ({selected_model})",
         data=csv_data,
-        file_name="bed_elevation_trend_25y.csv",
+        file_name=f"bed_elevation_{selected_model.lower().replace(' ', '_')}_25y.csv",
         mime="text/csv"
     )
     
-    st.caption(f"CSV contains {st.session_state.csv_rows:,} rows (25 years at {dt_hours}-hour intervals)")
+    st.caption(f"CSV contains {len(result_df):,} rows (25 years at {st.session_state.dt_hours}-hour intervals)")
     st.caption("• 'data model' column: observed data only (rest is empty)")
-    st.caption("• 'best fit' column: continuous projection for all 25 years")
+    st.caption(f"• 'best fit' column: continuous {selected_model} projection for all 25 years")
